@@ -70,13 +70,47 @@ def get_advanced_metrics(df,csv_name=''):
 
 	return df
 
-def get_elo_rating():
-	pass
+
+def add_elo_rating(df_elos,df):
+	df_elos.set_index(['season','team_id'], inplace=True)
+	print(df_elos.head())
+	df['Welo'] = df.apply(lambda row: df_elos.loc[(row.Season),(row.WTeamID)], axis=1)
+	df['Lelo'] = df.apply(lambda row: df_elos.loc[(row.Season),(row.LTeamID)], axis=1)
+	return df
 
 
+def get_season_stats(df,season,team_id,stats):
+	wstats = []
+	lstats = []
+	w = df.loc[(df['WTeamID'] == team_id) & (df['Season'] == season)]
+	l = df.loc[(df['LTeamID'] == team_id) & (df['Season'] == season)]
+	for stat in stats:
+		wstats.append(w['W' + stat].sum())
+		lstats.append(l['L' + stat].sum())
+	season_stats = [season,team_id] + [(i+j) / (len(w) + len(l)) for i,j in zip(wstats,lstats)]
+	return season_stats
+
+
+def get_all_season_stats(df,stats):
+	team_ids = pd.unique(df['WTeamID'].append(df['LTeamID']))
+	seasons = pd.unique(df['Season'])
+	lists = []
+	for season in seasons:
+		for team_id in team_ids:
+			lists.append(get_season_stats(df,season,team_id,stats))
+	seasons_stats = pd.DataFrame(lists,columns=(['Season','TeamID'] + stats))
+	seasons_stats.drop(seasons_stats[seasons_stats.isnull().any(axis=1)].index, inplace=True)
+	return seasons_stats
+
+
+def create_pred(df):
+	df['Pred'] = df.apply(lambda row: int(int(row.WTeamID) < int(row.LTeamID)), axis=1)
+	return df
 
 
 def main():
+	
+
 	# Import datasets
 	teams = pd.read_csv(data_path + 'Teams.csv')
 	seeds = pd.read_csv(data_path + 'NCAATourneySeeds.csv')
@@ -96,14 +130,26 @@ def main():
 	detailed_second_tourney = pd.read_csv(data_path + 'SecondaryTourneyTeams.csv')
 	team_coaches = pd.read_csv(data_path + 'TeamCoaches.csv')
 	team_conferences = pd.read_csv(data_path + 'TeamConferences.csv')
+	
+	# Get season elo rating and rename columns
 	season_elos = pd.read_csv(data_path + 'season_elos.csv')
+	season_elos.rename(columns={'season':'Season','team_id':'TeamID'},inplace=True)
 
 	#df = get_advanced_metrics(detailed_reg_season,csv_name=data_path + 'advanced_reg_season.csv')
 	df = pd.read_csv(data_path + 'advanced_reg_season.csv')
+
+	# 1 if winning team has lower id, 0 if losing team has lower id
+	df = create_pred(df)
+
+
+	#df = add_elo_rating(season_elos,df)
+	stats = ['FTAR','ORP','DRP','PIE','eFGP']
+	stats_df = get_all_season_stats(df,stats)
+	
+	train_stats = stats_df.merge(season_elos,on=['Season','TeamID'],validate='one_to_one')
+
+	print(season_elos.head())
 	print(df.head())
-	df['WPIE'].groupby(df['Season'], df['WTeamID']).describe()
-
-
 
 if __name__ == '__main__':
 	main()
