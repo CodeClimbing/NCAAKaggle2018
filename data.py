@@ -103,9 +103,46 @@ def get_all_season_stats(df,stats):
 	return seasons_stats
 
 
-def create_pred(df):
-	df['Pred'] = df.apply(lambda row: int(int(row.WTeamID) < int(row.LTeamID)), axis=1)
+def create_outcome(df):
+	df['Outcome'] = (df['WTeamID'] < df['LTeamID']).astype(float)
 	return df
+
+
+# Might be useless since tourney games are played in neutral stadium
+def get_at_home(df):
+	df['WHome'] = (df['WLoc'] == 'H').astype(int)
+	df['LHome'] = (df['LLoc'] == 'H').astype(int)
+
+
+def get_seeds(seed_data):
+	def splice_seed(x):
+		if len(x) == 4:
+			x = x[1:-1]
+		else:
+			x = x[1:]
+		if x[0] == '0':
+			x = x[1]
+		return x
+	seed_data['Seed'] = seed_data['Seed'].apply(splice_seed).astype(float)
+
+	return seed_data
+
+
+def diff_stats(train, stat_data):
+	stat_data.set_index(['Season','TeamID'],inplace=True)
+	train = pd.concat([train,train.apply(lambda row: stat_data.loc[row.Season,row.WTeamID] - stat_data.loc[row.Season,row.LTeamID],axis=1)],axis=1)
+	return train
+
+
+def get_diff_stats(train, stat_data):
+	stat_data.set_index(['Season','TeamID'],inplace=True)
+	for row in train:
+		train[row] = train[row].apply(lambda x: stat_data)
+
+def normalize_elos(df):
+	df['season_elo'] = ((df['season_elo'] - df['season_elo'].min()) / (df['season_elo'].max() - df['season_elo'].min()))
+	return df
+
 
 
 def main():
@@ -122,7 +159,6 @@ def main():
 	tourney_results = pd.read_csv(data_path + 'NCAATourneyCompactResults.csv')
 	detailed_tourney_results = pd.read_csv(data_path + 'NCAATourneyDetailedResults.csv')
 	tourney_all = pd.read_csv(data_path + 'NCAATourneySeedRoundSlots.csv')
-	tourney_seeds = pd.read_csv(data_path + 'NCAATourneySeeds.csv')
 	tourney_slots = pd.read_csv(data_path + 'NCAATourneySlots.csv')
 	detailed_reg_season = pd.read_csv(data_path + 'RegularSeasonDetailedResults.csv')
 	seasons = pd.read_csv(data_path + 'Seasons.csv')
@@ -131,25 +167,40 @@ def main():
 	team_coaches = pd.read_csv(data_path + 'TeamCoaches.csv')
 	team_conferences = pd.read_csv(data_path + 'TeamConferences.csv')
 	
+
+
+	seed_data = get_seeds(seeds)
+	print(seed_data.describe())
+	
+
+	# Get Tourney data Wteam, Lteam, Season, Winning
+	tourney_results.drop(tourney_results.index[tourney_results['Season'] < 2003], inplace=True)
+	tourney_results = create_outcome(tourney_results)
+	tourney_results = tourney_results[['Season', 'WTeamID', 'LTeamID', 'Outcome']]
+
 	# Get season elo rating and rename columns
 	season_elos = pd.read_csv(data_path + 'season_elos.csv')
+	season_elos = normalize_elos(season_elos)
 	season_elos.rename(columns={'season':'Season','team_id':'TeamID'},inplace=True)
-
+	print(season_elos.describe())
 	#df = get_advanced_metrics(detailed_reg_season,csv_name=data_path + 'advanced_reg_season.csv')
 	df = pd.read_csv(data_path + 'advanced_reg_season.csv')
 
 	# 1 if winning team has lower id, 0 if losing team has lower id
-	df = create_pred(df)
-
+	df = create_outcome(df)
 
 	#df = add_elo_rating(season_elos,df)
 	stats = ['FTAR','ORP','DRP','PIE','eFGP']
 	stats_df = get_all_season_stats(df,stats)
 	
 	train_stats = stats_df.merge(season_elos,on=['Season','TeamID'],validate='one_to_one')
+	#train_stats = train_stats.merge(seed_data,on=['Season','TeamID'],validate='one_to_one')
+	
 
-	print(season_elos.head())
-	print(df.head())
+	print(diff_stats(tourney_results,train_stats))
+
+	print(train_stats.head())
+
 
 if __name__ == '__main__':
 	main()
